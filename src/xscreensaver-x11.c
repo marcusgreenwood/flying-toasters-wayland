@@ -8,6 +8,7 @@
 #include <time.h>
 #include <stdio.h>
 #include <X11/Xlib.h>
+#include <X11/Xutil.h>
 #include <X11/xpm.h>
 #include "../img/toast.xpm"
 #include "../img/toaster.xpm"
@@ -20,7 +21,7 @@
 #define GRID_HEIGHT 4
 #define MAX_TOASTER_SPEED 4
 #define MAX_TOAST_SPEED 3
-#define FPS 30            /* Lower FPS for Pi - smoother than slowdown */
+#define FPS 60            /* One XPutImage per frame - fast enough now */
 
 struct Toaster { int slot, x, y, moveDistance, currentFrame; };
 struct Toast { int slot, x, y, moveDistance; };
@@ -68,37 +69,41 @@ static Window get_xscreensaver_window(Display *dpy) {
     return 0;
 }
 
-static void draw_x11(Display *dpy, Window win, GC gc, Pixmap buf,
-    XImage **toasterImg, Pixmap *toasterMask, XImage *toastImg, Pixmap toastMask,
-    struct Toaster *toasters, struct Toast *toasts,
-    int width, int height)
-{
-    XSetForeground(dpy, gc, BlackPixelOfScreen(DefaultScreenOfDisplay(dpy)));
-    XFillRectangle(dpy, buf, gc, 0, 0, (unsigned)width, (unsigned)height);
-
-    for (int i = 0; i < TOAST_COUNT; i++) {
-        if (isScrolledToScreen(toasts[i].x, toasts[i].y, width)) {
-            XSetClipMask(dpy, gc, toastMask);
-            XSetClipOrigin(dpy, gc, toasts[i].x, toasts[i].y);
-            XPutImage(dpy, buf, gc, toastImg, 0, 0, toasts[i].x, toasts[i].y,
-                SPRITE_SIZE, SPRITE_SIZE);
+/* Blit sprite onto buffer where mask is opaque. Uses XGetPixel/XPutPixel for format safety. */
+static void blit_sprite(XImage *buf, XImage *sprite, XImage *mask, int dx, int dy, int buf_w, int buf_h) {
+    for (int sy = 0; sy < SPRITE_SIZE; sy++) {
+        int by = dy + sy;
+        if (by < 0 || by >= buf_h) continue;
+        for (int sx = 0; sx < SPRITE_SIZE; sx++) {
+            int bx = dx + sx;
+            if (bx < 0 || bx >= buf_w) continue;
+            if (XGetPixel(mask, sx, sy) != 0)
+                XPutPixel(buf, bx, by, XGetPixel(sprite, sx, sy));
         }
     }
-    XSetClipMask(dpy, gc, None);
+}
 
+static void draw_x11_composite(Display *dpy, Window win, XImage *bufImg,
+    XImage **toasterImg, XImage **toasterMaskImg, XImage *toastImg, XImage *toastMaskImg,
+    struct Toaster *toasters, struct Toast *toasts,
+    int width, int height, unsigned long black)
+{
+    (void)dpy;
+    (void)win;
+    (void)black;
+    /* Clear buffer (0 is typically black for TrueColor) */
+    memset(bufImg->data, 0, (size_t)bufImg->bytes_per_line * height);
+
+    for (int i = 0; i < TOAST_COUNT; i++) {
+        if (isScrolledToScreen(toasts[i].x, toasts[i].y, width))
+            blit_sprite(bufImg, toastImg, toastMaskImg, toasts[i].x, toasts[i].y, width, height);
+    }
     for (int i = 0; i < TOASTER_COUNT; i++) {
         if (isScrolledToScreen(toasters[i].x, toasters[i].y, width)) {
             int f = toasters[i].currentFrame;
-            XSetClipMask(dpy, gc, toasterMask[f]);
-            XSetClipOrigin(dpy, gc, toasters[i].x, toasters[i].y);
-            XPutImage(dpy, buf, gc, toasterImg[f], 0, 0, toasters[i].x, toasters[i].y,
-                SPRITE_SIZE, SPRITE_SIZE);
+            blit_sprite(bufImg, toasterImg[f], toasterMaskImg[f], toasters[i].x, toasters[i].y, width, height);
         }
     }
-    XSetClipMask(dpy, gc, None);
-
-    XCopyArea(dpy, buf, win, gc, 0, 0, width, height, 0, 0);
-    XFlush(dpy);
 }
 
 int run_xscreensaver_x11(void) {
@@ -132,13 +137,15 @@ int run_xscreensaver_x11(void) {
     }
 
     int width = xwa.width, height = xwa.height;
+    Screen *screen = xwa.screen;
+    Visual *vis = xwa.visual;
     int depth = xwa.depth;
 
+    unsigned long black = BlackPixelOfScreen(screen);
     GC gc = XCreateGC(dpy, win, 0, NULL);
-    Pixmap buf = XCreatePixmap(dpy, win, (unsigned)width, (unsigned)height, (unsigned)depth);
 
     XImage *toasterImg[TOASTER_SPRITE_COUNT];
-    Pixmap toasterMask[TOASTER_SPRITE_COUNT];
+    XImage *toasterMaskImg[TOASTER_SPRITE_COUNT];
     XImage *clipMask = NULL;
 
     for (int i = 0; i < TOASTER_SPRITE_COUNT; i++) {
@@ -146,20 +153,13 @@ int run_xscreensaver_x11(void) {
             fprintf(stderr, "flying-toasters: failed to load toaster sprite %d\n", i);
             for (int j = 0; j < i; j++) {
                 XDestroyImage(toasterImg[j]);
-                XFreePixmap(dpy, toasterMask[j]);
+                XDestroyImage(toasterMaskImg[j]);
             }
-            XFreePixmap(dpy, buf);
             XFreeGC(dpy, gc);
             XCloseDisplay(dpy);
             return 1;
         }
-        toasterMask[i] = XCreatePixmap(dpy, win, (unsigned)clipMask->width,
-            (unsigned)clipMask->height, (unsigned)clipMask->depth);
-        GC mask_gc = XCreateGC(dpy, toasterMask[i], 0, NULL);
-        XPutImage(dpy, toasterMask[i], mask_gc, clipMask, 0, 0, 0, 0,
-            clipMask->width, clipMask->height);
-        XFreeGC(dpy, mask_gc);
-        XDestroyImage(clipMask);
+        toasterMaskImg[i] = clipMask;
         clipMask = NULL;
     }
 
@@ -168,20 +168,42 @@ int run_xscreensaver_x11(void) {
         fprintf(stderr, "flying-toasters: failed to load toast sprite\n");
         for (int i = 0; i < TOASTER_SPRITE_COUNT; i++) {
             XDestroyImage(toasterImg[i]);
-            XFreePixmap(dpy, toasterMask[i]);
+            XDestroyImage(toasterMaskImg[i]);
         }
-        XFreePixmap(dpy, buf);
         XFreeGC(dpy, gc);
         XCloseDisplay(dpy);
         return 1;
     }
-    Pixmap toastMask = XCreatePixmap(dpy, win, (unsigned)clipMask->width,
-        (unsigned)clipMask->height, (unsigned)clipMask->depth);
-    GC toast_mask_gc = XCreateGC(dpy, toastMask, 0, NULL);
-    XPutImage(dpy, toastMask, toast_mask_gc, clipMask, 0, 0, 0, 0,
-        clipMask->width, clipMask->height);
-    XFreeGC(dpy, toast_mask_gc);
-    XDestroyImage(clipMask);
+    XImage *toastMaskImg = clipMask;
+
+    /* Screen buffer - one XPutImage per frame instead of many with clip masks */
+    XImage *bufImg = XCreateImage(dpy, vis, (unsigned)depth, ZPixmap, 0, NULL,
+        (unsigned)width, (unsigned)height, 32, 0);
+    if (!bufImg) {
+        fprintf(stderr, "flying-toasters: XCreateImage failed\n");
+        for (int i = 0; i < TOASTER_SPRITE_COUNT; i++) {
+            XDestroyImage(toasterImg[i]);
+            XDestroyImage(toasterMaskImg[i]);
+        }
+        XDestroyImage(toastImg);
+        XDestroyImage(toastMaskImg);
+        XFreeGC(dpy, gc);
+        XCloseDisplay(dpy);
+        return 1;
+    }
+    bufImg->data = (char *)calloc(1, (size_t)bufImg->bytes_per_line * height);
+    if (!bufImg->data) {
+        XDestroyImage(bufImg);
+        for (int i = 0; i < TOASTER_SPRITE_COUNT; i++) {
+            XDestroyImage(toasterImg[i]);
+            XDestroyImage(toasterMaskImg[i]);
+        }
+        XDestroyImage(toastImg);
+        XDestroyImage(toastMaskImg);
+        XFreeGC(dpy, gc);
+        XCloseDisplay(dpy);
+        return 1;
+    }
 
     int *grid = initGrid();
     struct Toaster toasters[TOASTER_COUNT];
@@ -229,19 +251,22 @@ int run_xscreensaver_x11(void) {
         }
         frame = (frame + 1) % 256;
 
-        draw_x11(dpy, win, gc, buf, toasterImg, toasterMask, toastImg, toastMask,
-            toasters, toasts, width, height);
+        draw_x11_composite(dpy, win, bufImg, toasterImg, toasterMaskImg, toastImg, toastMaskImg,
+            toasters, toasts, width, height, black);
+        XPutImage(dpy, win, gc, bufImg, 0, 0, 0, 0, width, height);
+        XFlush(dpy);
 
         { struct timespec ts = { 0, (long)(1000000000 / FPS) }; nanosleep(&ts, NULL); }
     }
 
+    free(bufImg->data);
+    XDestroyImage(bufImg);
     for (int i = 0; i < TOASTER_SPRITE_COUNT; i++) {
         XDestroyImage(toasterImg[i]);
-        XFreePixmap(dpy, toasterMask[i]);
+        XDestroyImage(toasterMaskImg[i]);
     }
     XDestroyImage(toastImg);
-    XFreePixmap(dpy, toastMask);
-    XFreePixmap(dpy, buf);
+    XDestroyImage(toastMaskImg);
     XFreeGC(dpy, gc);
     XCloseDisplay(dpy);
     return 0;
