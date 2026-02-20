@@ -7,7 +7,6 @@
 #include <string.h>
 #include <time.h>
 #include <stdio.h>
-#include <unistd.h>
 #include <X11/Xlib.h>
 #include <X11/xpm.h>
 #include "../img/toast.xpm"
@@ -238,7 +237,7 @@ int run_xscreensaver_x11(void) {
         draw_x11(dpy, win, gc, buf, toasterImg, toasterMask, toastImg, toastMask,
             toasters, toasts, width, height);
 
-        usleep(1000000 / FPS);
+        { struct timespec ts = { 0, (long)(1000000000 / FPS) }; nanosleep(&ts, NULL); }
     }
 
     for (int i = 0; i < TOASTER_SPRITE_COUNT; i++) {
