@@ -121,7 +121,8 @@ int run_xscreensaver_x11(void) {
         return 1;
     }
 
-    XSelectInput(dpy, win, KeyPressMask | ButtonPressMask);
+    /* Don't XSelectInput - xscreensaver's window may deny attribute changes (BadAccess).
+     * XScreensaver will kill our process when user activates. */
 
     XWindowAttributes xwa;
     if (!XGetWindowAttributes(dpy, win, &xwa)) {
@@ -200,12 +201,6 @@ int run_xscreensaver_x11(void) {
 
     int frame = 0;
     while (1) {
-        XEvent ev;
-        if (XPending(dpy)) {
-            XNextEvent(dpy, &ev);
-            if (ev.type == KeyPress || ev.type == ButtonPress) break;
-        }
-
         for (int i = 0; i < TOAST_COUNT; i++) {
             int nx = toasts[i].x - toasts[i].moveDistance;
             int ny = toasts[i].y + toasts[i].moveDistance;
