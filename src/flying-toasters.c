@@ -19,25 +19,14 @@
 #define MAX_TOAST_SPEED 3
 #define FPS 60
 
-/* Parse XSCREENSAVER_WINDOW env var (hex "0x123" or decimal "123") */
-static int get_xscreensaver_window(unsigned long *out) {
-    const char *s = getenv("XSCREENSAVER_WINDOW");
-    if (!s || !*s) return 0;
-    if (sscanf(s, " 0x%lx", out) == 1) return 1;
-    if (sscanf(s, " %lu", out) == 1) return 1;
-    if (sscanf(s, "0x%lx", out) == 1) return 1;
-    if (sscanf(s, "%lu", out) == 1) return 1;
-    return 0;
-}
-
 int main(int argc, char *argv[]) {
     srand((unsigned)time(NULL));
 
     int windowed = (argc > 1 && strcmp(argv[1], "-windowed") == 0);
-    unsigned long xss_win = 0;
-    int use_xscreensaver = get_xscreensaver_window(&xss_win);
+    int use_xscreensaver = (getenv("XSCREENSAVER_WINDOW") != NULL && getenv("XSCREENSAVER_WINDOW")[0] != '\0');
 
-    /* When run by xscreensaver, we must use X11 and draw on its window */
+    /* When run by xscreensaver, use X11 - SDL_CreateWindowFrom causes BadWindow
+     * with xscreensaver's window, so we create our own fullscreen window instead. */
     if (use_xscreensaver) {
         setenv("SDL_VIDEODRIVER", "x11", 1);
     }
@@ -47,42 +36,30 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    SDL_Window *window;
-    if (use_xscreensaver) {
-        window = SDL_CreateWindowFrom((void *)(unsigned long)xss_win);
-        if (!window) {
-            fprintf(stderr, "SDL_CreateWindowFrom(XSCREENSAVER_WINDOW) failed: %s\n", SDL_GetError());
-            SDL_Quit();
-            return 1;
+    Uint32 win_flags = SDL_WINDOW_SHOWN;
+    int win_w = 1920, win_h = 1080;
+    if (!windowed || use_xscreensaver) {
+        win_flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
+        SDL_DisplayMode dm;
+        if (SDL_GetDesktopDisplayMode(0, &dm) == 0) {
+            win_w = dm.w;
+            win_h = dm.h;
         }
-    } else {
-        Uint32 win_flags = SDL_WINDOW_SHOWN;
-        int win_w = 1920, win_h = 1080;
-        if (!windowed) {
-            win_flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
-            SDL_DisplayMode dm;
-            if (SDL_GetDesktopDisplayMode(0, &dm) == 0) {
-                win_w = dm.w;
-                win_h = dm.h;
-            }
-        }
-        window = SDL_CreateWindow(
-            "Flying Toasters",
-            SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-            win_w, win_h,
-            win_flags
-        );
-        if (!window) {
-            fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
-            SDL_Quit();
-            return 1;
-        }
+    }
+    SDL_Window *window = SDL_CreateWindow(
+        "Flying Toasters",
+        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+        win_w, win_h,
+        win_flags
+    );
+    if (!window) {
+        fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
+        SDL_Quit();
+        return 1;
     }
 
 #ifdef __linux__
-    /* Software renderer avoids GPU/Wayland flickering - except when embedding in xscreensaver */
-    if (!use_xscreensaver)
-        SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
+    SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
 #endif
 
     SDL_Renderer *renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
@@ -95,7 +72,7 @@ int main(int argc, char *argv[]) {
     }
     if (!renderer) {
         fprintf(stderr, "SDL_CreateRenderer failed: %s\n", SDL_GetError());
-        if (!use_xscreensaver) SDL_DestroyWindow(window);
+        SDL_DestroyWindow(window);
         SDL_Quit();
         return 1;
     }
@@ -106,7 +83,7 @@ int main(int argc, char *argv[]) {
     if (!toastTexture) {
         fprintf(stderr, "Failed to load sprites\n");
         SDL_DestroyRenderer(renderer);
-        if (!use_xscreensaver) SDL_DestroyWindow(window);
+        SDL_DestroyWindow(window);
         SDL_Quit();
         return 1;
     }
@@ -115,9 +92,7 @@ int main(int argc, char *argv[]) {
     SDL_GetWindowSize(window, &width, &height);
 
 #ifdef __linux__
-    /* Let Wayland compositor finish window setup before drawing (not needed when embedded in xscreensaver) */
-    if (!use_xscreensaver)
-        SDL_Delay(200);
+    SDL_Delay(200);  /* Let compositor finish window setup */
 #endif
 
     struct Toaster toasters[TOASTER_COUNT];
@@ -193,8 +168,7 @@ int main(int argc, char *argv[]) {
 
     freeSprites(toasterTextures, toastTexture);
     SDL_DestroyRenderer(renderer);
-    if (!use_xscreensaver)
-        SDL_DestroyWindow(window);
+    SDL_DestroyWindow(window);
     SDL_Quit();
 
     return 0;
