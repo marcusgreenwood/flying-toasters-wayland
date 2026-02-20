@@ -13,14 +13,14 @@
 #include "../img/toaster.xpm"
 
 #define TOASTER_SPRITE_COUNT 6
-#define TOASTER_COUNT 10
-#define TOAST_COUNT 6
+#define TOASTER_COUNT 6   /* Fewer sprites for Pi/X11 performance */
+#define TOAST_COUNT 4
 #define SPRITE_SIZE 64
 #define GRID_WIDTH 4
 #define GRID_HEIGHT 4
 #define MAX_TOASTER_SPEED 4
 #define MAX_TOAST_SPEED 3
-#define FPS 60
+#define FPS 30            /* Lower FPS for Pi - smoother than slowdown */
 
 struct Toaster { int slot, x, y, moveDistance, currentFrame; };
 struct Toast { int slot, x, y, moveDistance; };
