@@ -1,26 +1,60 @@
 # Flying Toasters
 
-Classic [After Dark](https://en.wikipedia.org/wiki/After_Dark_(software)) screensaver recreation for XScreensaver.
+Classic [After Dark](https://en.wikipedia.org/wiki/After_Dark_(software)) screensaver recreation.
 
 ![image](https://user-images.githubusercontent.com/1062217/231195791-1b5be6d7-5461-4243-8199-2a7dc88458d4.png)
 
-## Installation
+Runs on **Wayland**, **X11**, and **Raspberry Pi** using SDL2.
 
-1. Install XScreensaver. Check your distribution instructions on how to do it.
-2. Download [flying-toasters](https://github.com/torunar/flying-toasters-xscreensaver/releases/latest) anywhere on your computer, for example `/usr/local/bin/flying-toasters`.
-3. Add path to `flying-toasters` executable to the `programs` section in `~/.xscreensaver`. It should look like this:
-    ```
-    programs:                                                                     \
-                                    maze -root                                  \n\
-    - GL:                           superquadrics -root                         \n\
-    ...
-    - GL:                           sphereeversion -root                        \n\
-                                    /usr/local/bin/flying-toasters              \n\
-    ```
-4. Launch XScreensaver and select "Flying-toasters" as your screensaver. It has no settings.
+## Building
 
-## Building locally
+### Dependencies
 
-1. Install `gcc` and `libx11-dev` and `libxpm-dev` libraries.
-2. Run `make build` from the source code directory to build from source.
-3. Built screensaver will be put into the `bin` directory. Type `make run` to preview it in windowed mode.
+- **Raspberry Pi / Debian / Ubuntu:**
+  ```bash
+  sudo apt install build-essential pkg-config libsdl2-dev
+  ```
+- **macOS:**
+  ```bash
+  brew install sdl2
+  ```
+
+### Build
+
+```bash
+make build
+```
+
+The binary will be in `bin/flying-toasters`. Run `make run` to preview in windowed mode, or `./bin/flying-toasters` for fullscreen.
+
+## Raspberry Pi & Wayland
+
+On Raspberry Pi OS (64-bit, Bookworm) with Wayland, SDL2 uses Wayland automatically. No extra setup needed.
+
+To force Wayland if both X11 and Wayland are available:
+```bash
+SDL_VIDEODRIVER=wayland ./bin/flying-toasters
+```
+
+**Controls:** Press Escape or close the window to exit.
+
+## Using as a Screensaver
+
+- **Wayland:** Use with a Wayland screensaver/inhibit daemon. Some options:
+  - [swayidle](https://github.com/swaywm/swayidle) + custom script
+  - [wayland-idle-inhibit](https://github.com/nwg-piotr/nwg-shell)
+- **X11 / XScreensaver:** Add to `~/.xscreensaver`:
+  ```
+  /usr/local/bin/flying-toasters
+  ```
+
+## Docker
+
+Cross-compile for Linux (e.g. from macOS):
+```bash
+docker build -t flying-toasters .
+docker create --name ft flying-toasters
+docker cp ft:/flying-toasters ./
+docker rm ft
+chmod +x flying-toasters
+```

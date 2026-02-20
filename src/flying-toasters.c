@@ -1,10 +1,10 @@
 #include <stdlib.h>
-#include <unistd.h>
 #include <string.h>
 #include <time.h>
+#include <SDL.h>
 #include "../img/toast.xpm"
 #include "../img/toaster.xpm"
-#include "vroot.h"
+#include "xpm.h"
 #include "flying-toasters.h"
 
 #define TOASTER_SPRITE_COUNT 6
@@ -18,122 +18,137 @@
 #define FPS 60
 
 int main(int argc, char *argv[]) {
-    srand(time(NULL));
+    srand((unsigned)time(NULL));
 
-    Display *display;
-    Window window;
-    GC graphicContext;
-    XWindowAttributes windowAttributes;
-    Pixmap outputBuffer;
+    int windowed = (argc > 1 && strcmp(argv[1], "-windowed") == 0);
+
+    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+        SDL_Log("SDL_Init failed: %s", SDL_GetError());
+        return 1;
+    }
+
+    Uint32 win_flags = SDL_WINDOW_SHOWN;
+    int win_w = 1920, win_h = 1080;
+    if (!windowed) {
+        win_flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
+        /* Get display size for fullscreen */
+        SDL_DisplayMode dm;
+        if (SDL_GetDesktopDisplayMode(0, &dm) == 0) {
+            win_w = dm.w;
+            win_h = dm.h;
+        }
+    }
+
+    SDL_Window *window = SDL_CreateWindow(
+        "Flying Toasters",
+        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+        win_w, win_h,
+        win_flags
+    );
+    if (!window) {
+        SDL_Log("SDL_CreateWindow failed: %s", SDL_GetError());
+        SDL_Quit();
+        return 1;
+    }
+
+    /* Use software renderer for maximum compatibility on Raspberry Pi Wayland;
+     * remove SDL_RENDERER_SOFTWARE to allow OpenGL ES if available. */
+    SDL_Renderer *renderer = SDL_CreateRenderer(
+        window, -1,
+        SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC
+    );
+    if (!renderer) {
+        renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
+    }
+    if (!renderer) {
+        SDL_Log("SDL_CreateRenderer failed: %s", SDL_GetError());
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        return 1;
+    }
+
+    SDL_Texture *toasterTextures[TOASTER_SPRITE_COUNT];
+    SDL_Texture *toastTexture;
+    loadSprites(renderer, toasterTextures, &toastTexture);
+
+    int width, height;
+    SDL_GetWindowSize(window, &width, &height);
 
     struct Toaster toasters[TOASTER_COUNT];
-    XImage *toasterSprites[TOASTER_SPRITE_COUNT];
-    Pixmap toasterClipMasks[TOASTER_SPRITE_COUNT];
-
     struct Toast toasts[TOAST_COUNT];
-    XImage *toastSprite;
-    Pixmap toastClipMask;
-
-    display = XOpenDisplay(getenv("DISPLAY"));
-    window = createWindow(display, !(argc > 1 && strcmp(argv[1], "-windowed") == 0));
-    graphicContext = XCreateGC(display, window, 0, NULL);
-
-    XGetWindowAttributes(display, window, &windowAttributes);
-    outputBuffer = XCreatePixmap(
-            display,
-            window,
-            windowAttributes.width,
-            windowAttributes.height,
-            windowAttributes.depth
-    );
-
-    loadSprites(display, window, toasterSprites, toasterClipMasks, &toastSprite, &toastClipMask);
-
-    int frameCounter = 0;
-    int newX, newY, i, j;
     int *grid = initGrid();
 
-    spawnToasters(toasters, windowAttributes.width, windowAttributes.height, grid);
-    spawnToasts(toasts, windowAttributes.width, windowAttributes.height, grid);
+    spawnToasters(toasters, width, height, grid);
+    spawnToasts(toasts, width, height, grid);
 
-    while (1) {
-        XSetForeground(display, graphicContext, BlackPixelOfScreen(DefaultScreenOfDisplay(display)));
-        XFillRectangle(display, outputBuffer, graphicContext, 0, 0, windowAttributes.width, windowAttributes.height);
+    int frameCounter = 0;
+    int running = 1;
+    SDL_Event event;
 
-        frameCounter = (frameCounter + 1) % 256;
-        for (i = 0; i < TOAST_COUNT; i++) {
-            if (isScrolledToScreen(toasts[i].x, toasts[i].y, windowAttributes.width)) {
-                drawSprite(display, graphicContext, outputBuffer, toastSprite, toastClipMask, toasts[i].x, toasts[i].y);
-            }
-
-            newX = toasts[i].x - toasts[i].moveDistance;
-            newY = toasts[i].y + toasts[i].moveDistance;
-            if (isScrolledOutOfScreen(newX, newY, windowAttributes.height)) {
-                setToastSpawnCoordinates(&toasts[i], windowAttributes.width, windowAttributes.height);
-                continue;
-            }
-
-            toasts[i].x = newX;
-            toasts[i].y = newY;
+    while (running) {
+        while (SDL_PollEvent(&event)) {
+            if (event.type == SDL_QUIT ||
+                (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE))
+                running = 0;
         }
 
-        for (i = 0; i < TOASTER_COUNT; i++) {
-            if (isScrolledToScreen(toasters[i].x, toasters[i].y, windowAttributes.width)) {
-                drawSprite(
-                        display,
-                        graphicContext,
-                        outputBuffer,
-                        toasterSprites[toasters[i].currentFrame],
-                        toasterClipMasks[toasters[i].currentFrame],
-                        toasters[i].x,
-                        toasters[i].y
-                );
-            }
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+        SDL_RenderClear(renderer);
 
-            newX = toasters[i].x - toasters[i].moveDistance;
-            newY = toasters[i].y + toasters[i].moveDistance;
-            if (isScrolledOutOfScreen(newX, newY, windowAttributes.height)) {
-                setToasterSpawnCoordinates(&toasters[i], windowAttributes.width, windowAttributes.height);
-                continue;
-            }
+        frameCounter = (frameCounter + 1) % 256;
 
-            for (j = 0; j < TOASTER_COUNT; j++) {
-                if ((i != j) && hasSpriteCollision(toasters[j].x, toasters[j].y, newX, newY, 0)) {
-                    if (toasters[i].x <= toasters[j].x + SPRITE_SIZE) {
-                        newY = toasters[i].y + toasters[j].moveDistance;
-                    } else {
-                        newX = toasters[i].x - toasters[j].moveDistance;
+        /* Draw and update toasts */
+        for (int i = 0; i < TOAST_COUNT; i++) {
+            if (isScrolledToScreen(toasts[i].x, toasts[i].y, width)) {
+                drawSprite(renderer, toastTexture, toasts[i].x, toasts[i].y);
+            }
+            int newX = toasts[i].x - toasts[i].moveDistance;
+            int newY = toasts[i].y + toasts[i].moveDistance;
+            if (isScrolledOutOfScreen(newX, newY, height)) {
+                setToastSpawnCoordinates(&toasts[i], width, height);
+            } else {
+                toasts[i].x = newX;
+                toasts[i].y = newY;
+            }
+        }
+
+        /* Draw and update toasters */
+        for (int i = 0; i < TOASTER_COUNT; i++) {
+            if (isScrolledToScreen(toasters[i].x, toasters[i].y, width)) {
+                drawSprite(renderer, toasterTextures[toasters[i].currentFrame],
+                          toasters[i].x, toasters[i].y);
+            }
+            int newX = toasters[i].x - toasters[i].moveDistance;
+            int newY = toasters[i].y + toasters[i].moveDistance;
+            if (isScrolledOutOfScreen(newX, newY, height)) {
+                setToasterSpawnCoordinates(&toasters[i], width, height);
+            } else {
+                for (int j = 0; j < TOASTER_COUNT; j++) {
+                    if (i != j && hasSpriteCollision(toasters[j].x, toasters[j].y, newX, newY, 0)) {
+                        if (toasters[i].x <= toasters[j].x + SPRITE_SIZE) {
+                            newY = toasters[i].y + toasters[j].moveDistance;
+                        } else {
+                            newX = toasters[i].x - toasters[j].moveDistance;
+                        }
+                        break;
                     }
-                    break;
                 }
+                toasters[i].x = newX;
+                toasters[i].y = newY;
             }
-
-            toasters[i].x = newX;
-            toasters[i].y = newY;
-
             if (frameCounter % (10 - toasters[i].moveDistance) == 0) {
                 toasters[i].currentFrame = (toasters[i].currentFrame + 1) % TOASTER_SPRITE_COUNT;
             }
         }
 
-        XCopyArea(
-                display,
-                outputBuffer,
-                window,
-                graphicContext,
-                0,
-                0,
-                windowAttributes.width,
-                windowAttributes.height,
-                0,
-                0
-        );
-        XFlush(display);
-
-        usleep(1000000 / FPS);
+        SDL_RenderPresent(renderer);
+        SDL_Delay(1000 / FPS);
     }
 
-    XCloseDisplay(display);
+    freeSprites(toasterTextures, toastTexture);
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
+    SDL_Quit();
 
     return 0;
 }
@@ -151,77 +166,34 @@ int isScrolledOutOfScreen(int x, int y, int screenHeight) {
     return (x <= -SPRITE_SIZE) || (y >= screenHeight);
 }
 
-Window createWindow(Display *display, int isInRoot) {
-    Window window;
-    XEvent e;
-
-    window = DefaultRootWindow(display);
-    if (!isInRoot) {
-        window = XCreateSimpleWindow(
-                display,
-                window,
-                200,
-                200,
-                1920,
-                1080,
-                1,
-                BlackPixel(display, DefaultScreen(display)),
-                BlackPixel(display, DefaultScreen(display))
-        );
-        XStoreName(display, window, "flying-toasters");
-        XSelectInput(display, window, StructureNotifyMask);
-        XMapRaised(display, window);
-        do {
-            XWindowEvent(display, window, StructureNotifyMask, &e);
-        } while (e.type != MapNotify);
+void loadSprites(SDL_Renderer *renderer,
+                 SDL_Texture **toasterTextures,
+                 SDL_Texture **toastTexture) {
+    for (int i = 0; i < TOASTER_SPRITE_COUNT; i++) {
+        SDL_Surface *surf = xpm_to_surface((const char *const *)toasterXpm[i]);
+        if (!surf) {
+            for (int j = 0; j < i; j++) SDL_DestroyTexture(toasterTextures[j]);
+            *toastTexture = NULL;
+            return;
+        }
+        toasterTextures[i] = SDL_CreateTextureFromSurface(renderer, surf);
+        SDL_FreeSurface(surf);
     }
-
-    return window;
+    SDL_Surface *toastSurf = xpm_to_surface((const char *const *)toastXpm);
+    if (!toastSurf) {
+        for (int i = 0; i < TOASTER_SPRITE_COUNT; i++) SDL_DestroyTexture(toasterTextures[i]);
+        *toastTexture = NULL;
+        return;
+    }
+    *toastTexture = SDL_CreateTextureFromSurface(renderer, toastSurf);
+    SDL_FreeSurface(toastSurf);
 }
 
-void loadSprites(
-        Display *display,
-        Window window,
-        XImage **toasterSprites,
-        Pixmap *toasterClipMasks,
-        XImage **toastSprite,
-        Pixmap *toastClipMask
-) {
-    XImage *clipMask = NULL;
-
+void freeSprites(SDL_Texture **toasterTextures, SDL_Texture *toastTexture) {
     for (int i = 0; i < TOASTER_SPRITE_COUNT; i++) {
-        XpmCreateImageFromData(display, toasterXpm[i], &toasterSprites[i], &clipMask, NULL);
-        toasterClipMasks[i] = XCreatePixmap(display, window, clipMask->width, clipMask->height, clipMask->depth);
-        XPutImage(
-                display,
-                toasterClipMasks[i],
-                XCreateGC(display, toasterClipMasks[i], 0, NULL),
-                clipMask,
-                0,
-                0,
-                0,
-                0,
-                clipMask->width,
-                clipMask->height
-        );
-        clipMask = NULL;
+        SDL_DestroyTexture(toasterTextures[i]);
     }
-
-    XpmCreateImageFromData(display, toastXpm, toastSprite, &clipMask, NULL);
-    *toastClipMask = XCreatePixmap(display, window, clipMask->width, clipMask->height, clipMask->depth);
-    XPutImage(
-            display,
-            *toastClipMask,
-            XCreateGC(display, *toastClipMask, 0, NULL),
-            clipMask,
-            0,
-            0,
-            0,
-            0,
-            clipMask->width,
-            clipMask->height
-    );
-    clipMask = NULL;
+    SDL_DestroyTexture(toastTexture);
 }
 
 void setToasterSpawnCoordinates(struct Toaster *toaster, int screenWidth, int screenHeight) {
@@ -255,46 +227,22 @@ void spawnToasts(struct Toast *toasts, int screenWidth, int screenHeight, int *g
     }
 }
 
-void drawSprite(
-        Display *display,
-        GC graphicContext,
-        Pixmap outputBuffer,
-        XImage *sprite,
-        Pixmap clipMask,
-        int x,
-        int y
-) {
-    XSetClipMask(display, graphicContext, clipMask);
-    XSetClipOrigin(display, graphicContext, x, y);
-    XPutImage(
-            display,
-            outputBuffer,
-            graphicContext,
-            sprite,
-            0,
-            0,
-            x,
-            y,
-            SPRITE_SIZE,
-            SPRITE_SIZE
-    );
-    XSetClipMask(display, graphicContext, None);
+void drawSprite(SDL_Renderer *renderer, SDL_Texture *texture, int x, int y) {
+    if (!texture) return;
+    SDL_Rect dst = { x, y, SPRITE_SIZE, SPRITE_SIZE };
+    SDL_RenderCopy(renderer, texture, NULL, &dst);
 }
 
-int *initGrid() {
+int *initGrid(void) {
     static int grid[TOASTER_COUNT + TOAST_COUNT];
-    int i, j;
-
-    for (i = 0; i < TOASTER_COUNT + TOAST_COUNT; i++) {
+    for (int i = 0; i < TOASTER_COUNT + TOAST_COUNT; i++) {
         grid[i] = i;
     }
-
-    for (i = 0; i < TOASTER_COUNT + TOAST_COUNT - 1; i++) {
-        j = i + rand() % (TOASTER_COUNT + TOAST_COUNT - i);
+    for (int i = 0; i < TOASTER_COUNT + TOAST_COUNT - 1; i++) {
+        int j = i + rand() % (TOASTER_COUNT + TOAST_COUNT - i);
         int t = grid[j];
         grid[j] = grid[i];
         grid[i] = t;
     }
-
     return grid;
 }

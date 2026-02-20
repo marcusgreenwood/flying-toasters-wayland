@@ -1,8 +1,8 @@
-FROM ubuntu:18.04 AS build
+# Use Debian Bookworm (same base as Raspberry Pi OS) for SDL2/Wayland support
+FROM debian:bookworm-slim AS build
 
-RUN apt update && \
-    apt upgrade --yes && \
-    apt install --yes build-essential gcc libx11-dev libxpm-dev
+RUN apt-get update && \
+    apt-get install --yes build-essential gcc pkg-config libsdl2-dev
 
 COPY . /app
 WORKDIR /app
