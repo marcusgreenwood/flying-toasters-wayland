@@ -1,0 +1,13 @@
+---
+description: Git workflow - push changes after edits
+alwaysApply: true
+---
+
+# Git Workflow
+
+After making any code changes to this project, always:
+1. Stage the changed files
+2. Commit with a descriptive message
+3. Push to the wayland remote (`git push wayland master`)
+
+Do not leave uncommitted or unpushed changes.
