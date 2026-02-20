@@ -7,6 +7,7 @@
 #include <string.h>
 #include <time.h>
 #include <stdio.h>
+#include <unistd.h>
 #include <X11/Xlib.h>
 #include <X11/xpm.h>
 #include "../img/toast.xpm"
@@ -58,6 +59,7 @@ static int *initGrid(void) {
 }
 
 static Window get_xscreensaver_window(Display *dpy) {
+    (void)dpy;
     const char *s = getenv("XSCREENSAVER_WINDOW");
     if (!s || !*s) return 0;
     unsigned long id = 0;
