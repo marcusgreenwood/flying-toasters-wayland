@@ -2,6 +2,7 @@
 #include <string.h>
 #include <time.h>
 #include <SDL.h>
+#include <stdio.h>
 #include "../img/toast.xpm"
 #include "../img/toaster.xpm"
 #include "xpm.h"
@@ -23,7 +24,7 @@ int main(int argc, char *argv[]) {
     int windowed = (argc > 1 && strcmp(argv[1], "-windowed") == 0);
 
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
-        SDL_Log("SDL_Init failed: %s", SDL_GetError());
+        fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
         return 1;
     }
 
@@ -46,19 +47,23 @@ int main(int argc, char *argv[]) {
         win_flags
     );
     if (!window) {
-        SDL_Log("SDL_CreateWindow failed: %s", SDL_GetError());
+        fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
         SDL_Quit();
         return 1;
     }
 
-    /* Use software renderer for maximum compatibility on Raspberry Pi Wayland;
-     * remove SDL_RENDERER_SOFTWARE to allow OpenGL ES if available. */
-    SDL_Renderer *renderer = SDL_CreateRenderer(
-        window, -1,
-        SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC
-    );
+#ifdef __linux__
+    /* Software renderer avoids GPU/Wayland flickering on Raspberry Pi */
+    SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
+#endif
+
+    SDL_Renderer *renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
     if (!renderer) {
-        renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
+        renderer = SDL_CreateRenderer(window, -1,
+            SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    }
+    if (!renderer) {
+        renderer = SDL_CreateRenderer(window, -1, 0);
     }
     if (!renderer) {
         SDL_Log("SDL_CreateRenderer failed: %s", SDL_GetError());
@@ -68,11 +73,23 @@ int main(int argc, char *argv[]) {
     }
 
     SDL_Texture *toasterTextures[TOASTER_SPRITE_COUNT];
-    SDL_Texture *toastTexture;
+    SDL_Texture *toastTexture = NULL;
     loadSprites(renderer, toasterTextures, &toastTexture);
+    if (!toastTexture) {
+        fprintf(stderr, "Failed to load sprites\n");
+        SDL_DestroyRenderer(renderer);
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        return 1;
+    }
 
     int width, height;
     SDL_GetWindowSize(window, &width, &height);
+
+#ifdef __linux__
+    /* Let Wayland compositor finish window setup before drawing */
+    SDL_Delay(200);
+#endif
 
     struct Toaster toasters[TOASTER_COUNT];
     struct Toast toasts[TOAST_COUNT];
