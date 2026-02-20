@@ -11,14 +11,32 @@ SDL_CFLAGS = $(shell pkg-config --cflags sdl2 2>/dev/null || sdl2-config --cflag
 SDL_LIBS = $(shell pkg-config --libs sdl2 2>/dev/null || sdl2-config --libs 2>/dev/null)
 X11_CFLAGS = $(shell pkg-config --cflags x11 xpm 2>/dev/null)
 X11_LIBS = $(shell pkg-config --libs x11 xpm 2>/dev/null)
-X11_LIBS := $(or $(X11_LIBS),-lX11 -lXpm)
+
+# xscreensaver X11 path - enable when pkg-config finds it, or on Linux with headers, or FORCE_X11=1
+HAVE_X11 =
+ifneq ($(X11_CFLAGS),)
+  HAVE_X11 = 1
+  X11_LIBS := $(or $(X11_LIBS),-lX11 -lXpm)
+endif
+ifeq ($(HAVE_X11),)
+  ifeq ($(shell uname -s 2>/dev/null),Linux)
+    ifeq ($(shell test -f /usr/include/X11/Xlib.h 2>/dev/null && echo y),y)
+      HAVE_X11 = 1
+      X11_CFLAGS =
+      X11_LIBS = -lX11 -lXpm
+    endif
+  endif
+endif
+ifdef FORCE_X11
+  HAVE_X11 = 1
+  X11_CFLAGS =
+  X11_LIBS = -lX11 -lXpm
+endif
 
 SRCS = src/flying-toasters.c src/xpm.c
 X11_SRCS =
 TARGET = bin/flying-toasters
-
-# xscreensaver X11 path (needs libx11-dev libxpm-dev on Debian/Raspberry Pi)
-ifneq ($(X11_CFLAGS),)
+ifdef HAVE_X11
   X11_SRCS = src/xscreensaver-x11.c
   CFLAGS += -DHAVE_XSCREENSAVER_X11
 endif
