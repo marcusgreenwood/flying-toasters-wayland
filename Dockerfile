@@ -2,7 +2,7 @@
 FROM debian:bookworm-slim AS build
 
 RUN apt-get update && \
-    apt-get install --yes build-essential gcc pkg-config libsdl2-dev
+    apt-get install --yes build-essential gcc pkg-config libsdl2-dev libx11-dev libxpm-dev
 
 COPY . /app
 WORKDIR /app

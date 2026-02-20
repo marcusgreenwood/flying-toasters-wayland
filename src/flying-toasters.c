@@ -9,6 +9,10 @@
 #include "xpm.h"
 #include "flying-toasters.h"
 
+#ifdef HAVE_XSCREENSAVER_X11
+int run_xscreensaver_x11(void);
+#endif
+
 #define TOASTER_SPRITE_COUNT 6
 #define TOASTER_COUNT 10
 #define TOAST_COUNT 6
@@ -22,14 +26,17 @@
 int main(int argc, char *argv[]) {
     srand((unsigned)time(NULL));
 
-    int windowed = (argc > 1 && strcmp(argv[1], "-windowed") == 0);
-    int use_xscreensaver = (getenv("XSCREENSAVER_WINDOW") != NULL && getenv("XSCREENSAVER_WINDOW")[0] != '\0');
-
-    /* When run by xscreensaver, use X11 - SDL_CreateWindowFrom causes BadWindow
-     * with xscreensaver's window, so we create our own fullscreen window instead. */
-    if (use_xscreensaver) {
-        setenv("SDL_VIDEODRIVER", "x11", 1);
+    /* When run by xscreensaver, use raw X11 to draw on its window. */
+    if (getenv("XSCREENSAVER_WINDOW") != NULL && getenv("XSCREENSAVER_WINDOW")[0] != '\0') {
+#ifdef HAVE_XSCREENSAVER_X11
+        return run_xscreensaver_x11();
+#else
+        fprintf(stderr, "flying-toasters: xscreensaver requires libx11-dev and libxpm-dev\n");
+        return 1;
+#endif
     }
+
+    int windowed = (argc > 1 && strcmp(argv[1], "-windowed") == 0);
 
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
@@ -38,7 +45,7 @@ int main(int argc, char *argv[]) {
 
     Uint32 win_flags = SDL_WINDOW_SHOWN;
     int win_w = 1920, win_h = 1080;
-    if (!windowed || use_xscreensaver) {
+    if (!windowed) {
         win_flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
         SDL_DisplayMode dm;
         if (SDL_GetDesktopDisplayMode(0, &dm) == 0) {

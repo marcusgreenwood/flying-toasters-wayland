@@ -13,6 +13,8 @@ Runs on **Wayland**, **X11**, and **Raspberry Pi** using SDL2.
 - **Raspberry Pi / Debian / Ubuntu:**
   ```bash
   sudo apt install build-essential pkg-config libsdl2-dev
+  # For xscreensaver support (draws directly on its window):
+  sudo apt install libx11-dev libxpm-dev
   ```
 - **macOS:**
   ```bash
@@ -47,6 +49,7 @@ SDL_VIDEODRIVER=wayland ./bin/flying-toasters
   ```
   /usr/local/bin/flying-toasters
   ```
+  Requires `libx11-dev` and `libxpm-dev`. When launched by xscreensaver, draws directly on its window (no flickering). If you see "DISPLAY is not set", ensure xscreensaver is started with your session's DISPLAY (e.g. `export DISPLAY=:0` in your autostart).
 
 ## Docker
 
